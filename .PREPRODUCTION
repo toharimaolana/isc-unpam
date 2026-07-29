@@ -1,0 +1,223 @@
+# PRE-PRODUCTION CHECKLIST — AbsenKu ISC UNPAM
+# Jalankan semua langkah ini SEBELUM launch ke production.
+# Setiap item harus ✅ sebelum deploy ke Vercel.
+
+***
+
+## FASE 1 — BUILD & DEPENDENCY
+
+> Tujuan: Pastikan tidak ada error tersembunyi sebelum kode naik ke server.
+
+```bash
+# Hapus cache dan node_modules lama
+rm -rf node_modules dist .vite
+npm install
+
+# Build production — harus 0 error, 0 warning kritis
+npm run build
+
+# Preview hasil build secara lokal (bukan dev server)
+npm run preview
+```
+
+Checklist:
+- [ ] `npm run build` selesai tanpa error
+- [ ] Tidak ada warning "Cannot find module" atau "Failed to resolve import"
+- [ ] Ukuran bundle wajar — total < 2MB (jalankan `du -sh dist/`)
+- [ ] `npm run preview` bisa diakses di browser tanpa error console
+
+***
+
+## FASE 2 — ENVIRONMENT & SUPABASE
+
+> Tujuan: Pastikan koneksi ke Supabase production benar.
+
+```bash
+# Pastikan .env.local berisi URL dan key yang benar
+cat .env.local
+```
+
+Checklist:
+- [ ] `VITE_SUPABASE_URL` mengarah ke project Supabase yang benar (bukan project dev lain)
+- [ ] `VITE_SUPABASE_ANON_KEY` valid dan belum expired
+- [ ] `.env.local` tidak di-commit ke Git (`git status` tidak menampilkan file ini)
+- [ ] `.gitignore` sudah berisi baris `.env.local`
+- [ ] Vercel Environment Variables sudah diisi (Settings → Environment Variables)
+
+***
+
+## FASE 3 — SUPABASE PRODUCTION CHECK
+
+> Tujuan: Pastikan database, RLS, dan Realtime siap.
+
+Buka Supabase Dashboard dan cek:
+
+**Tabel & Schema:**
+- [ ] Tabel `members` ada dan bisa di-SELECT
+- [ ] Tabel `classes` ada dan bisa di-SELECT
+- [ ] Tabel `attendances` ada dengan constraint UNIQUE(class_id, member_id)
+- [ ] Tabel `profiles` ada dengan kolom role (admin/operator/member)
+- [ ] Semua index sudah terpasang (idx_att_class, idx_att_member, idx_cls_date)
+
+**Row Level Security:**
+- [ ] RLS aktif di semua 4 tabel (ada tanda kunci di Supabase Table Editor)
+- [ ] Policy read untuk authenticated user sudah ada di semua tabel
+- [ ] Policy write hanya untuk role admin/operator sudah ada
+- [ ] Test: login sebagai member → tidak bisa INSERT ke attendances langsung
+
+**Auth:**
+- [ ] Minimal 1 akun admin sudah ada di Authentication → Users
+- [ ] Akun admin sudah ada di tabel profiles dengan role = 'admin'
+- [ ] Email confirmation dimatikan jika komunitas pakai invite manual
+  (Auth → Settings → Email → Disable email confirmations)
+
+**Realtime:**
+- [ ] Tabel attendances sudah diaktifkan Realtime
+  (Database → Replication → Source → centang tabel attendances)
+
+***
+
+## FASE 4 — FUNCTIONAL TESTING (MANUAL)
+
+> Tujuan: Test semua alur utama end-to-end dengan data nyata.
+
+Buka `npm run preview` di browser, jalankan semua skenario ini:
+
+### AUTH
+- [ ] Login email + password yang salah → muncul pesan error, tidak crash
+- [ ] Login dengan akun admin yang benar → masuk ke Dashboard
+- [ ] Tombol Logout → kembali ke halaman Login, tidak bisa akses /dashboard lagi
+
+### DASHBOARD
+- [ ] Dashboard load tanpa error
+- [ ] Summary card tampil (boleh angka 0 jika data kosong)
+- [ ] Tidak ada broken layout atau teks yang terpotong
+
+### SCAN BARCODE
+- [ ] Dropdown kelas aktif hari ini tampil
+- [ ] Kamera bisa diakses (test di HTTPS atau localhost)
+- [ ] Scan barcode valid → muncul nama anggota + Snackbar hijau "hadir"
+- [ ] Scan barcode yang sama lagi → Snackbar biru "Sudah hadir" (bukan error)
+- [ ] Scan barcode format salah → Snackbar merah "Format tidak dikenali"
+- [ ] Scan barcode anggota divisi lain → Snackbar warning "bukan dari divisi ini"
+- [ ] Scan barcode expired → Snackbar warning "Barcode expired"
+- [ ] ScanLog tampil dan terisi saat scan
+
+### ABSEN MANUAL
+- [ ] Tombol "Absen Manual" disabled saat belum pilih kelas
+- [ ] Tombol "Absen Manual" aktif setelah pilih kelas
+- [ ] Modal terbuka → list anggota tampil
+- [ ] Search nama → filter berjalan real-time
+- [ ] Search NIM → filter berjalan real-time
+- [ ] Klik "Catat Hadir" → badge "Sudah Hadir" muncul, Snackbar sukses
+- [ ] Klik "Catat Hadir" lagi ke anggota yang sama → Snackbar info "Sudah hadir"
+- [ ] Tutup modal → scan barcode masih berfungsi normal
+
+### MANAJEMEN ANGGOTA
+- [ ] Halaman /members load dan tampil tabel anggota
+- [ ] Tambah anggota baru → ID barcode ter-generate otomatis
+- [ ] ID barcode valid sesuai format ISC[YY][DD][UUUUUU]
+- [ ] Edit anggota → data tersimpan
+- [ ] Hapus anggota → muncul confirm dialog, jika konfirmasi baru terhapus
+
+### MANAJEMEN KELAS
+- [ ] Halaman /classes load
+- [ ] Buat kelas baru → tersimpan dan muncul di list
+- [ ] Edit kelas → data tersimpan
+- [ ] Hapus kelas → muncul confirm dialog
+
+### REKAP
+- [ ] Halaman /rekap load
+- [ ] Pilih kelas → tabel rekap tampil
+- [ ] Anggota yang absen via barcode tampil dengan Metode = "Barcode"
+- [ ] Anggota yang absen via manual tampil dengan Metode = "Manual"
+- [ ] Anggota yang tidak hadir tetap tampil dengan status "Tidak Hadir"
+- [ ] Export CSV → file ter-download dan bisa dibuka di Excel/Spreadsheet
+- [ ] Export Excel → file ter-download dan bisa dibuka di Excel/Spreadsheet
+
+### ROLE GUARD
+- [ ] Login sebagai member → tidak bisa akses /scan, /members, /classes
+- [ ] Login sebagai operator → bisa scan dan absen manual, tidak bisa hapus anggota
+- [ ] Login sebagai admin → full akses semua halaman
+
+***
+
+## FASE 5 — RESPONSIVE & CROSS-DEVICE
+
+> Tujuan: Pastikan tampilan oke di HP (karena scan barcode dilakukan di HP).
+
+Test di viewport:
+- [ ] Desktop 1280px → layout tidak berantakan
+- [ ] Tablet 768px → sidebar masih bisa dipakai
+- [ ] Mobile 375px → halaman /scan bisa dipakai untuk scan
+
+***
+
+## FASE 6 — EDGE CASES
+
+> Tujuan: Pastikan app tidak crash di kondisi tidak normal.
+
+- [ ] Buka app tanpa internet → muncul pesan error yang jelas, tidak crash
+- [ ] Supabase down (simulasi dengan URL salah di .env) → muncul Alert error, tidak blank page
+- [ ] Scan saat belum pilih kelas → tombol scan disabled, tidak bisa crash
+- [ ] Import Excel dengan file kosong → muncul pesan validasi, tidak crash
+- [ ] Form tambah anggota dikosongkan semua → muncul validasi required
+
+***
+
+## FASE 7 — SECURITY FINAL CHECK
+
+- [ ] Tidak ada Supabase key yang ter-print di console browser
+- [ ] Tidak ada data sensitif (email, NIM) yang ter-log di console
+- [ ] RLS tidak di-disable di tabel mana pun
+- [ ] Semua operasi DELETE ada confirm dialog
+
+***
+
+## FASE 8 — DEPLOY KE VERCEL
+
+Setelah semua checklist ✅ baru lanjut deploy:
+
+```bash
+# Pastikan semua perubahan ter-commit
+git status
+git add .
+git commit -m "chore: pre-production final check"
+git push origin main
+```
+
+Di Vercel Dashboard:
+- [ ] Project sudah terhubung ke repo GitHub yang benar
+- [ ] Environment Variables sudah diisi (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY)
+- [ ] Build Command: `npm run build`
+- [ ] Output Directory: `dist`
+- [ ] Trigger deploy → tunggu build selesai
+- [ ] Buka URL production → test login dan scan sekali lagi
+
+***
+
+## FASE 9 — POST-LAUNCH (Setelah Live)
+
+- [ ] Setup cron anti-pause Supabase di cron-job.org:
+      Setiap 3 hari → GET {SUPABASE_URL}/rest/v1/members?limit=1
+      Header: apikey: {ANON_KEY}
+- [ ] Catat tanggal launch dan versi pertama di AGENTS.md
+- [ ] Informasikan URL ke anggota ISC UNPAM
+
+***
+
+## RINGKASAN STATUS
+
+| Fase | Nama | Status |
+|---|---|---|
+| 1 | Build & Dependency | [x] |
+| 2 | Environment & Supabase | [x] |
+| 3 | Supabase Production Check | [ ] |
+| 4 | Functional Testing | [ ] |
+| 5 | Responsive & Cross-Device | [ ] |
+| 6 | Edge Cases | [ ] |
+| 7 | Security Final Check | [x] |
+| 8 | Deploy ke Vercel | [ ] |
+| 9 | Post-Launch | [ ] |
+
+> Semua fase harus ✅ sebelum URL disebarkan ke anggota.
